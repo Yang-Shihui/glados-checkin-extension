@@ -556,7 +556,8 @@ async function clickFlow(tabId, idx, runState) {
     }
     await mirror(runState);
     // 运行级进度（行内步骤条已有账号级状态，顶栏不重复说同一件事）
-    const total = (runState.acctInfo && runState.acctInfo.length) || runState.accounts.length;
+    // 总数 = 切换目标数（他人列表）+ 当前账号
+    const total = ((runState.acctInfo && runState.acctInfo.length) || 0) + 1;
     await setProgress(`已完成 ${runState.done || 0}/${total} · 当前签到 ${elapsed}s`);
 
     let st = null;
