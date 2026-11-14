@@ -523,30 +523,39 @@ async function awaitResult(tabId, readFn, timeoutMs) {
   return "";
 }
 
-// 带后台超时重试的点击流程：后台标签页里 Turnstile 可能被浏览器节流，
-// 首次超时后把标签页提到前台再试一次，结束归还后台
+// 带后台超时重试的点击流程：后台标签页里 Turnstile 可能等可见性而不自动解，
+// 首次点击时即提亮到前台（通过率显著更高），结束后归还后台
 async function clickFlowWithRetry(tabId, idx, runState) {
-  let r = await clickFlow(tabId, idx, runState);
-  if (r.status !== "page-timeout") return r;
-  try { await chrome.tabs.update(tabId, { active: true }); } catch (e) {}
-  if (runState.accounts[idx]) {
-    runState.accounts[idx].status = "signing";
-    runState.accounts[idx].detail = "后台超时，提到前台重试";
-  }
-  await mirror(runState);
+  let promoted = false;
+  const promote = async () => {
+    if (promoted) return;
+    try { await chrome.tabs.update(tabId, { active: true }); promoted = true; } catch (e) {}
+  };
+  let r;
   try {
-    r = await clickFlow(tabId, idx, runState);
+    r = await clickFlow(tabId, idx, runState, promote);
+    if (r.status !== "page-timeout") return r;
+    await promote(); // 后台超时 → 前台重试
+    if (runState.accounts[idx]) {
+      runState.accounts[idx].status = "signing";
+      runState.accounts[idx].detail = "后台超时，提到前台重试";
+    }
+    await mirror(runState);
+    r = await clickFlow(tabId, idx, runState, promote);
   } finally {
-    try { await chrome.tabs.update(tabId, { active: false }); } catch (e) {}
+    if (promoted) {
+      try { await chrome.tabs.update(tabId, { active: false }); } catch (e) {}
+    }
   }
   return r;
 }
 
 // 单账号点击流程（短轮询；每轮更新心跳与该账号的实时状态）
-async function clickFlow(tabId, idx, runState) {
+async function clickFlow(tabId, idx, runState, onPromote) {
   let patched = false;
   let clicked = false;
-  let clickAt = 0; // 像人一样：按钮出现后随机停留 0.8~2.5s 再点，不在出现的瞬间点
+  let clickAt = 0; // 像人一样：按钮出现后停留 3~4.5s 再点——留足时间让"已签"状态先落地，
+                   // 避免对着已签账号的瞬态按钮空跑 Turnstile；点击时提亮前台让 Turnstile 快速通过
   const startAt = Date.now();
   for (let i = 0; i < 50; i++) {
     runState.heartbeat = Date.now(); // 心跳
@@ -598,7 +607,10 @@ async function clickFlow(tabId, idx, runState) {
       try { await exec(tabId, patchNet, [], "MAIN"); patched = true; } catch (e) {}
     }
     if (st.hasButton && !clicked && patched) {
-      if (!clickAt) clickAt = Date.now() + 800 + Math.floor(Math.random() * 1700);
+      if (!clickAt) {
+        clickAt = Date.now() + 3000 + Math.floor(Math.random() * 1500);
+        if (onPromote) await onPromote(); // 首次决定点击时提亮前台：Turnstile 在可见页自动通过率更高
+      }
       if (Date.now() >= clickAt) {
         clicked = true;
         try { await exec(tabId, clickBtn); } catch (e) { clicked = false; }
