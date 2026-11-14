@@ -133,8 +133,20 @@ function balanceHtml(r) {
   return `<span class="muted detail">积分 ${esc(r.balance)}${streak}</span>`;
 }
 
+// 会话还原的独立提示行（非账号卡）
+function restoreNoteHtml(rows) {
+  const r = rows[rows.length - 1];
+  if (!r) return "";
+  if (r.status === "restored") {
+    const to = (r.message || "").replace(/^已切回\s*/, "");
+    return `<div class="restore-note ok">↩ 会话已切回运行前账号（${esc(to)}）</div>`;
+  }
+  return `<div class="restore-note warn">↩ 未能切回运行前账号，可在控制台手动切换</div>`;
+}
+
 function histHtml(h) {
-  const when = `${(h.date || "").slice(5)} ${h.time || ""}`;
+  // 自动运行的历史行带 [自动] 标注，与手动点击区分
+  const when = `${h.trigger === "auto" ? "[自动] " : ""}${(h.date || "").slice(5)} ${h.time || ""}`;
   const gain =
     h.status === "success" && h.points != null && Number(h.points) > 0
       ? ` <span class="pts">+${esc(h.points)}</span>`
@@ -176,12 +188,15 @@ async function render() {
         : [];
 
   renderBanner(st, rows, live);
+  // 还原/还原失败是"会话状态行"，不是账号卡——单独渲染成提示行，避免被当成第三个账号
+  const acctRows = rows.filter((r) => r.status !== "restored" && r.status !== "restore-failed");
+  const restoreRows = rows.filter((r) => r.status === "restored" || r.status === "restore-failed");
   // 只检测到 1 个账号时的引导提示（开源用户常见困惑点）
   const singleHint =
-    !live && rows.length === 1 && okRow(rows[0])
+    !live && acctRows.length === 1 && okRow(acctRows[0])
       ? '<div class="muted" style="font-size:11px; line-height:1.6; margin:2px 2px 6px;">只检测到 1 个账号——要多账号一起签，请在控制台右上角账号菜单「添加账号」绑定</div>'
       : "";
-  $accounts.innerHTML = rows.map(acctHtml).join("") + singleHint;
+  $accounts.innerHTML = acctRows.map(acctHtml).join("") + restoreNoteHtml(restoreRows) + singleHint;
 
   if (st.running) {
     $btn.disabled = true;

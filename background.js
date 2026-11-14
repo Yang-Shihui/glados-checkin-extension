@@ -618,6 +618,9 @@ async function finalizeRun(results, runState, notify) {
   const crit = results.filter((x) => x.status !== "restore-failed");
   const okCount = crit.filter((x) => x.status === "success" || x.status === "already" || x.status === "restored").length;
   const allOk = crit.length > 0 && okCount === crit.length;
+  // 通知里的"N/N"只数账号行（还原是会话状态，不是账号）
+  const acctRows = results.filter((x) => x.status !== "restored" && x.status !== "restore-failed");
+  const acctOk = acctRows.filter((x) => x.status === "success" || x.status === "already").length;
   const historyNew = results.map((x) => ({
     date: todayStr(),
     time: new Date().toTimeString().slice(0, 5),
@@ -642,7 +645,7 @@ async function finalizeRun(results, runState, notify) {
           type: "basic",
           iconUrl: "icons/icon128.png",
           title: "GLaDOS 多账号签到完成",
-          message: `${okCount}/${results.length} 个账号成功`,
+          message: `${acctOk}/${acctRows.length} 个账号签到成功`,
         });
       } catch (e) {}
     }

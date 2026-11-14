@@ -10,14 +10,27 @@ const elFactory = (id) => ({
   set textContent(v) { captured[id + ":text"] = v; },
   set className(v) { captured[id + ":cls"] = v; },
 });
+const stubState = { storage: {} };
 const stub = {
   document: { getElementById: (id) => elFactory(id) },
   chrome: {
     runtime: { sendMessage: async () => {}, getManifest: () => ({ version: "test" }) },
-    storage: { local: { get: async () => ({}) } },
+    storage: {
+      local: {
+        async get(keys) {
+          const d = stubState.storage;
+          const out = {};
+          for (const k of [].concat(keys)) if (d[k] !== undefined) out[k] = d[k];
+          return out;
+        },
+      },
+    },
   },
 };
-const fn = new Function("document", "chrome", src + "\nreturn { esc, pillHtml, fullMsg, okRow, acctHtml, histHtml, renderBanner };");
+const fn = new Function(
+  "document", "chrome",
+  src + "\nreturn { esc, pillHtml, fullMsg, okRow, acctHtml, histHtml, renderBanner, render };"
+);
 const api = fn(stub.document, stub.chrome);
 const today = api.esc(new Date().toLocaleDateString("sv-SE"));
 
@@ -96,23 +109,21 @@ check("历史行",
   ["11-14 14:04", "user1@example.com", "签到成功", "+7.2"],
   []);
 
-// 11) 还原行：已还原药丸 + 切回详情；restored 计入成功
-check("还原行",
-  api.acctHtml({ who: "还原", status: "restored", detail: "已切回 user2@example.com", balance: 108, streak: 1 }),
-  ["已还原", "已切回 user2@example.com", "积分 108"],
+// 11) 历史还原行：切回对象可见
+check("历史还原行",
+  api.histHtml({ date: "2026-11-14", time: "15:00", who: "还原", status: "restored", message: "已切回 user2@example.com" }),
+  ["15:00", "还原", "已还原", "已切回 user2@example.com"],
   []);
-if (api.okRow({ status: "restored" })) console.log("PASS restored 计入成功");
-else { console.log("FAIL restored 不计成功"); fail++; }
 
-// 12) 还原失败：非致命——横幅保持绿色，行内黄色"未还原"
-api.renderBanner({ lastResultsDate: today, lastSuccessDate: today },
-  [{ who: "a@b.c", status: "already" }, { who: "会话还原", status: "restore-failed" }], false);
-check("横幅-还原失败仍绿", captured["banner:cls"] + "|" + captured["banner:html"],
-  ["banner ok", "今日全部已签"], ["banner err", "今日未完成"]);
-check("还原失败行",
-  api.acctHtml({ who: "会话还原", status: "restore-failed", message: "未能切回原账号，可在控制台手动切换" }),
-  ["未还原", "pill warn", "未能切回原账号"],
+// 12) 历史行 [自动] 标注：auto 显示、manual 不显示
+check("历史行-自动标注",
+  api.histHtml({ date: "2026-11-14", time: "21:15", who: "user1@example.com", status: "already", trigger: "auto" }),
+  ["[自动] 11-14 21:15"],
   []);
+check("历史行-手动无标注",
+  api.histHtml({ date: "2026-11-14", time: "14:04", who: "user1@example.com", status: "success", points: 7.2 }),
+  ["11-14 14:04"],
+  ["[自动]"]);
 
 // 13) 进行中状态清点：pending/signing/switching/busy 都带 spinner
 for (const s of ["pending", "signing", "switching", "busy"]) {
@@ -120,11 +131,55 @@ for (const s of ["pending", "signing", "switching", "busy"]) {
 }
 console.log("PASS spinner 状态");
 
-// 14) 历史还原行：切回对象可见
-check("历史还原行",
-  api.histHtml({ date: "2026-11-14", time: "15:00", who: "还原", status: "restored", message: "已切回 user2@example.com" }),
-  ["15:00", "还原", "已还原", "已切回 user2@example.com"],
-  []);
+// 14) render 级：还原状态渲染为独立提示行（不是账号卡）+ 横幅仍绿
+(async () => {
+  stubState.storage = {
+    lastResults: [
+      { who: "user1@example.com", status: "already", balance: 585, streak: 5 },
+      { who: "user2@example.com", status: "already", balance: 320, streak: 3 },
+      { who: "还原", status: "restored", message: "已切回 user1@example.com", balance: 585, streak: 1 },
+    ],
+    lastResultsDate: today, lastSuccessDate: today, running: false, history: [],
+  };
+  await api.render();
+  check("还原提示行", captured["accounts:html"],
+    ["user1@example.com", "user2@example.com", "会话已切回运行前账号（user1@example.com）"],
+    ['class="who">还原']);
+  check("还原后横幅仍绿", captured["banner:cls"], ["banner ok"], []);
+  if (api.okRow({ status: "restored" })) console.log("PASS restored 计入成功");
+  else { console.log("FAIL restored 不计成功"); fail++; }
 
-console.log(fail === 0 ? "=== popup 渲染单测全部通过 ===" : fail + " 处失败");
-process.exit(fail === 0 ? 0 : 1);
+  // 15) render 级：还原失败 → 独立提示行 + 横幅仍绿（不计成败）
+  stubState.storage = {
+    lastResults: [
+      { who: "user1@example.com", status: "already", balance: 585, streak: 5 },
+      { who: "会话还原", status: "restore-failed", message: "未能切回原账号，可在控制台手动切换" },
+    ],
+    lastResultsDate: today, lastSuccessDate: today, running: false, history: [],
+  };
+  await api.render();
+  check("还原失败提示行", captured["accounts:html"],
+    ["未能切回运行前账号", "user1@example.com"],
+    ['class="who">会话还原']);
+  check("还原失败横幅仍绿", captured["banner:cls"], ["banner ok"], []);
+
+  // 16) 单账号引导提示：仅 1 个账号且成功时显示
+  stubState.storage = {
+    lastResults: [{ who: "user1@example.com", status: "already", balance: 585, streak: 5 }],
+    lastResultsDate: today, lastSuccessDate: today, running: false, history: [],
+  };
+  await api.render();
+  check("单账号提示", captured["accounts:html"], ["只检测到 1 个账号"], []);
+  stubState.storage = {
+    lastResults: [
+      { who: "user1@example.com", status: "already", balance: 585, streak: 5 },
+      { who: "user2@example.com", status: "already", balance: 320, streak: 3 },
+    ],
+    lastResultsDate: today, lastSuccessDate: today, running: false, history: [],
+  };
+  await api.render();
+  check("双账号无提示", captured["accounts:html"], ["user2@example.com"], ["只检测到 1 个账号"]);
+
+  console.log(fail === 0 ? "=== popup 渲染单测全部通过 ===" : fail + " 处失败");
+  process.exit(fail === 0 ? 0 : 1);
+})().catch((e) => { console.error("测试崩溃:", e); process.exit(1); });
