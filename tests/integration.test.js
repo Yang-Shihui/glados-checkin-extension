@@ -59,7 +59,7 @@ function makeEnv(opts = {}) {
     acct.signed = true;
     page.marker = opts.failMarker
       ? JSON.stringify({ code: 5, reason: "turnstile", message: "Cloudflare verification failed" })
-      : JSON.stringify({ code: 0, message: "Check-in success", points: 7.2 });
+      : JSON.stringify({ code: 0, message: "Check-in success", points: 7 });
     page.bodyText += " 签到成功";
   }
 
@@ -242,8 +242,8 @@ async function scenarioFreshSuccess() {
   console.log("[S1-RES]", JSON.stringify(res));
   ok(res.length === 3, "结果行数 3（账号0+账号1+还原）", `实际 ${res.length}`);
   ok(
-    res[0].status === "success" && res[0].points === 7.2,
-    "账号0 真签到成功 +7.2",
+    res[0].status === "success" && res[0].points === 7,
+    "账号0 真签到成功 +7",
     JSON.stringify(res[0]).slice(0, 200)
   );
   ok(res[0].who === "orig@gmail.com", "row0 邮箱来自身份接口");
@@ -305,7 +305,7 @@ async function scenarioChallenge() {
   setTimeout(() => {
     for (const t of Object.values(E.tabs)) {
       t.page.turnstileSolved = true;
-      t.page.marker = JSON.stringify({ code: 0, message: "Check-in success", points: 7.2 });
+      t.page.marker = JSON.stringify({ code: 0, message: "Check-in success", points: 7 });
       t.page.bodyText += " 签到成功";
     }
   }, 16000);

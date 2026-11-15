@@ -17,9 +17,9 @@
 
 ## 截图
 
-| 签到完成 | 签到进行中 |
+| 签到进行中 | 签到完成 |
 |:---:|:---:|
-| ![签到完成](docs/shot-done.png) | ![签到进行中](docs/shot-running.png) |
+| ![签到进行中](docs/shot-running.png) | ![签到完成](docs/shot-done.png) |
 
 ## 安装
 

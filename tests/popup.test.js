@@ -49,8 +49,8 @@ check("横幅-成功", captured["banner:cls"] + "|" + captured["banner:html"],
 
 // 2) 横幅-成功态带当日增量
 api.renderBanner({ lastSuccessDate: today, history: [{ date: today, time: "14:04", status: "success" }] },
-  [{ who: "a@b.c", status: "success", points: 7.2, balance: 315 }], false);
-check("横幅-增量", captured["banner:html"], ["今日 +7.2"], []);
+  [{ who: "a@b.c", status: "success", points: 7, balance: 315 }], false);
+check("横幅-增量", captured["banner:html"], ["今日 +7"], []);
 
 // 3) 横幅-运行态（1/2 + 实时动作）
 api.renderBanner({ running: true, progress: "14:04 已完成 1/2 · 当前签到 45s" },
@@ -105,8 +105,8 @@ else console.log("PASS XSS 转义");
 
 // 10) 历史行：日期缩写 + 增量
 check("历史行",
-  api.histHtml({ date: "2026-11-14", time: "14:04", who: "user1@example.com", status: "success", points: 7.2 }),
-  ["11-14 14:04", "user1@example.com", "签到成功", "+7.2"],
+  api.histHtml({ date: "2026-11-14", time: "14:04", who: "user1@example.com", status: "success", points: 7 }),
+  ["11-14 14:04", "user1@example.com", "签到成功", "+7"],
   []);
 
 // 11) 历史还原行：切回对象可见
@@ -121,7 +121,7 @@ check("历史行-自动标注",
   ["[自动] 11-14 21:15"],
   []);
 check("历史行-手动无标注",
-  api.histHtml({ date: "2026-11-14", time: "14:04", who: "user1@example.com", status: "success", points: 7.2 }),
+  api.histHtml({ date: "2026-11-14", time: "14:04", who: "user1@example.com", status: "success", points: 7 }),
   ["11-14 14:04"],
   ["[自动]"]);
 
