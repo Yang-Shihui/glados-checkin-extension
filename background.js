@@ -210,6 +210,15 @@ async function startRunInner(trigger) {
 async function runMultiCheckin(trigger, runState) {
   const results = [];
 
+  // 当天已有成功记录的账号集合：重跑时直接记"今日已签"，不再点击任何按钮——
+  // 防止误触 GLaDOS 新上线的 Daily Punch 押注打卡（消耗积分）
+  const { history: prevHistory } = await chrome.storage.local.get("history");
+  const signedToday = new Set(
+    (prevHistory || [])
+      .filter((h) => h.date === todayStr() && (h.status === "success" || h.status === "already"))
+      .map((h) => h.who)
+  );
+
   // 0) 快照当前 cookie（结束后还原，保证浏览现场不变）——单独存放，
   //    不随每秒的 runState 镜像反复写入
   const snapshot = await chrome.cookies.getAll({ domain: COOKIE_DOMAIN });
@@ -282,15 +291,19 @@ async function runMultiCheckin(trigger, runState) {
   const userInfo = parseUserInfo(await awaitResult(tab.id, readUserResult, 12000));
   runState.originalUid = userInfo.uid != null ? userInfo.uid : undefined;
   runState.originalEmail = userInfo.email || "";
+  // 当天已成功签过的账号：直接记"今日已签"，不开点击流程
+  const skip0 = !!(userInfo.email && signedToday.has(userInfo.email));
   runState.accounts.push({
     who: userInfo.email || "当前账号",
-    status: "signing",
-    detail: "页面加载中",
+    status: skip0 ? "already" : "signing",
+    detail: skip0 ? "今日已签（此前已成功）" : "页面加载中",
     balance: userInfo.balance != null ? userInfo.balance : undefined,
     streak: userInfo.streak != null ? userInfo.streak : undefined,
   });
   await mirror(runState);
-  let r = await clickFlowWithRetry(tab.id, 0, runState);
+  let r = skip0
+    ? { status: "already", message: "今日已签（此前已成功）" }
+    : await clickFlowWithRetry(tab.id, 0, runState);
   if (r.status === "not-logged-in") {
     results.push({ who: runState.accounts[0].who, ...r });
     await finalizeRun(results, runState, false);
@@ -299,9 +312,20 @@ async function runMultiCheckin(trigger, runState) {
   applyResult(runState, 0, r);
   results.push({ who: runState.accounts[0].who, balance: runState.accounts[0].balance, streak: runState.accounts[0].streak, ...r });
 
-  // 3) 逐个切换 → 签到
+  // 3) 逐个切换 → 签到（当天已签过的账号直接记"今日已签"，不切换不点击）
   try {
     for (const acc of others) {
+      if (signedToday.has(acc.email)) {
+        results.push({ who: acc.email, status: "already", message: "今日已签（此前已成功）", balance: acc.balance });
+        runState.accounts.push({
+          who: acc.email,
+          status: "already",
+          detail: "今日已签（此前已成功）",
+          balance: acc.balance,
+        });
+        await mirror(runState);
+        continue;
+      }
       const idx = runState.accounts.length;
       runState.accounts.push({
         who: acc.email || `用户 ${acc.userId}`,

@@ -319,6 +319,28 @@ async function scenarioChallenge() {
   ok(res.some((x) => x.status === "restored"), "还原正常");
 }
 
+// ===== 场景 6：当天已签后的重跑（全部跳过——不点击不切换，防误触押注按钮）=====
+async function scenarioRerun() {
+  console.log("--- 场景 6：当天已签重跑 ---");
+  const E = makeEnv({});
+  new Function("chrome", src)(E.chrome);
+  const today = new Date().toLocaleDateString("sv-SE");
+  E.store.history = [
+    { date: today, time: "14:27", who: "orig@gmail.com", status: "success", points: 6 },
+    { date: today, time: "14:27", who: "other@gmail.com", status: "already", points: 0 },
+  ];
+  await E.msgLC.fire({ cmd: "run" }, null, () => {});
+  await E.waitDone();
+
+  const res = E.store.lastResults;
+  ok(res.length === 2, "两行结果（无还原行）", `实际 ${res.length}`);
+  ok(res.every((x) => x.status === "already"), "全部记为今日已签");
+  ok(E.switchLog.length === 0, "没有执行任何切换");
+  ok(!("glados-retry" in E.alarms), "无重试闹钟");
+  ok(Object.keys(E.tabs).length === 0, "标签页已关闭");
+  ok(E.notifLog.some((n) => n.message.includes("2/2")), "通知 2/2 个账号签到成功");
+}
+
 // ===== 场景 4：看门狗清理死运行 =====
 async function scenarioWatchdog() {
   console.log("--- 场景 4：看门狗 ---");
@@ -349,6 +371,7 @@ async function scenarioWatchdog() {
   await scenarioNotLoggedIn();
   await scenarioRejected();
   await scenarioChallenge();
+  await scenarioRerun();
   await scenarioWatchdog();
   console.log(fail === 0 ? "=== 集成测试全部通过 ===" : fail + " 处失败");
   process.exit(fail === 0 ? 0 : 1);
