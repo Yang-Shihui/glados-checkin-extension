@@ -23,9 +23,9 @@
 
 ## 安装
 
-1. 下载本仓库：`Code → Download ZIP` 解压，或 `git clone`
+1. 下载并解压 [最新版 ZIP](https://github.com/Yang-Shihui/glados-checkin-extension/releases/latest)（Release 资产，解压即用；开发者也可 `git clone` 本仓库取源码）
 2. Chrome 打开 `chrome://extensions` → 右上角开启 **开发者模式**
-3. 点 **加载已解压的扩展程序** → 选择本目录
+3. 点 **加载已解压的扩展程序** → 选择解压出来的目录
 4. 在 GLaDOS 控制台右上角账号菜单 **「添加账号」** 绑定你的其他账号（只有一个账号也能用，会只签当前账号）
 5. 之后更新代码：回到 `chrome://extensions` 点本扩展卡片上的 **↻ 重新加载** 即可
 
