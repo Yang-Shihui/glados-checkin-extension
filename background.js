@@ -960,16 +960,18 @@ function stepOnce(clicked) {
   // 3000 字符曾导致已签状态探测不到、干等超时（67s 卡顿观感的根因）
   const body = document.body ? document.body.innerText.slice(0, 20000) : "";
 
-  // Cloudflare 整页挑战（验证框铺满整页，站点内容还没加载）
-  if (/Just a moment|Verify you are human|Attention Required/i.test(body) || /just a moment/i.test(document.title || "")) {
-    return { cfPage: true };
-  }
-
+  // 先判"未登录"（落地页特征明确）——落地页的登录表单里也有 Turnstile 的
+  // "Verify you are human" 字样，若先判 cfPage 会把未登录误报成"等待人工验证"
   const notLoggedIn =
     url.includes("authenticate") ||
     url.includes("/login") ||
     (body.includes("Create a free account") && body.includes("Log in"));
   if (notLoggedIn) return { notLoggedIn: true };
+
+  // Cloudflare 整页挑战（验证框铺满整页，站点内容还没加载）
+  if (/Just a moment|Verify you are human|Attention Required/i.test(body) || /just a moment/i.test(document.title || "")) {
+    return { cfPage: true };
+  }
 
   if (!url.includes("/console")) return {};
 
