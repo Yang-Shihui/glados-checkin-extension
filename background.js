@@ -13,12 +13,11 @@ const COOKIE_DOMAIN = "glados.rocks";
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set({ running: false, runState: null, progress: "就绪（扩展已重载）" });
   scheduleNext();
-  chrome.alarms.create(WATCHDOG, { periodInMinutes: 1 });
+  // 看门狗按需值班：仅签到运行期间由 startRun 上岗，结束后撤岗（不全天巡逻）
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   scheduleNext();
-  chrome.alarms.create(WATCHDOG, { periodInMinutes: 1 });
   await sleep(10000); // 等 Chrome 启动后网络就绪
   await maybeRun();   // 当天未签则立即补签
 });
@@ -112,18 +111,21 @@ async function setProgress(msg) {
   await chrome.storage.local.set({ progress: `${new Date().toTimeString().slice(0, 5)} ${msg}` });
 }
 
-// 把运行状态镜像到 storage：popup 据此实时渲染步骤条，看门狗据此判断心跳
-async function mirror(runState) {
+// 把运行状态镜像到 storage（可选附带进度文本，一次写入同时更新两者）：
+// popup 据此实时渲染步骤条，看门狗据此判断心跳
+async function mirror(runState, progressMsg) {
   runState.heartbeat = Date.now();
-  await chrome.storage.local.set({ runState });
+  const o = { runState };
+  if (progressMsg !== undefined) o.progress = `${new Date().toTimeString().slice(0, 5)} ${progressMsg}`;
+  await chrome.storage.local.set(o);
 }
 
-// ===== 看门狗：SW 被回收导致运行中断时清理现场 =====
+// ===== 看门狗：按需值班（运行期间每分钟触发），SW 被回收导致运行中断时清理现场 =====
 async function watchdog() {
-  const { runState } = await chrome.storage.local.get("runState");
+  const { runState, runSnapshot } = await chrome.storage.local.get(["runState", "runSnapshot"]);
   if (!runState || !runState.active) return;
   if (Date.now() - (runState.heartbeat || 0) < 90000) return; // 心跳正常
-  // 心跳停止 → 运行已死：标记中断行、还原 cookie 现场、关标签页、记历史
+  // 心跳停止 → 运行已死：标记中断行、还原 cookie 现场、关标签页、记历史、撤岗
   runState.active = false;
   const orphans = [];
   for (const a of runState.accounts || []) {
@@ -133,8 +135,8 @@ async function watchdog() {
       orphans.push(a);
     }
   }
-  if (runState.snapshot && runState.snapshot.length) {
-    try { await restoreCookies(runState.snapshot); } catch (e) {}
+  if (runSnapshot && runSnapshot.length) {
+    try { await restoreCookies(runSnapshot); } catch (e) {}
   }
   const { history = [] } = await chrome.storage.local.get("history");
   const entry = {
@@ -154,7 +156,9 @@ async function watchdog() {
     history: [entry, ...history].slice(0, 60),
     progress: "运行被浏览器中断，已重置——下个时段自动重试",
   });
+  await chrome.storage.local.remove("runSnapshot").catch(() => {});
   await setBadge("✗", "#b91c1c");
+  chrome.alarms.clear(WATCHDOG); // 现场已清理，撤岗
   // 中断属瞬态故障：自动重试（当天有上限）
   await scheduleRetry();
   if (runState.tabId) { try { await chrome.tabs.remove(runState.tabId); } catch (e) {} }
@@ -185,6 +189,7 @@ async function startRunInner(trigger) {
     accounts: [], // [{who, status: pending|signing|switching|success|already|failed, detail}]
   };
   await chrome.storage.local.set({ running: true, runningSince: Date.now(), runState, lastResults: [], progress: "启动…" });
+  chrome.alarms.create(WATCHDOG, { periodInMinutes: 1 }); // 看门狗按需上岗：仅运行期间每分钟巡逻
   let finalResults = [];
   try {
     finalResults = await runMultiCheckin(trigger, runState);
@@ -194,7 +199,9 @@ async function startRunInner(trigger) {
   } finally {
     runState.active = false;
     runState.heartbeat = Date.now();
+    chrome.alarms.clear(WATCHDOG); // 运行结束撤岗
     await chrome.storage.local.set({ runState, running: false, runningSince: 0 });
+    await chrome.storage.local.remove("runSnapshot").catch(() => {});
     if (runState.tabId) { try { await chrome.tabs.remove(runState.tabId); } catch (e) {} }
   }
 }
@@ -203,10 +210,11 @@ async function startRunInner(trigger) {
 async function runMultiCheckin(trigger, runState) {
   const results = [];
 
-  // 0) 快照当前 cookie（结束后还原，保证浏览现场不变）
+  // 0) 快照当前 cookie（结束后还原，保证浏览现场不变）——单独存放，
+  //    不随每秒的 runState 镜像反复写入
   const snapshot = await chrome.cookies.getAll({ domain: COOKIE_DOMAIN });
+  await chrome.storage.local.set({ runSnapshot: snapshot });
   await setProgress(`已快照 ${snapshot.length} 条 cookie`);
-  runState.snapshot = snapshot;
   await mirror(runState);
 
   const tab = await chrome.tabs.create({ url: CHECKIN_URL, active: false });
@@ -564,11 +572,10 @@ async function clickFlow(tabId, idx, runState, onPromote) {
     if (runState.accounts[idx] && runState.accounts[idx].status === "signing") {
       runState.accounts[idx].detail = `等待验证结果 (${elapsed}s)`;
     }
-    await mirror(runState);
-    // 运行级进度（行内步骤条已有账号级状态，顶栏不重复说同一件事）
+    // 运行级进度与状态镜像合并为一次写入（行内步骤条已有账号级状态）
     // 总数 = 切换目标数（他人列表）+ 当前账号
     const total = ((runState.acctInfo && runState.acctInfo.length) || 0) + 1;
-    await setProgress(`已完成 ${runState.done || 0}/${total} · 当前签到 ${elapsed}s`);
+    await mirror(runState, `已完成 ${runState.done || 0}/${total} · 当前签到 ${elapsed}s`);
 
     let st = null;
     try {
@@ -587,7 +594,7 @@ async function clickFlow(tabId, idx, runState, onPromote) {
         runState.challengeNotified = true;
         if (onPromote) await onPromote();
         if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
-        await mirror(runState);
+        await mirror(runState, "等待人工点击 Cloudflare 验证");
         try {
           const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
           chrome.notifications.create({
@@ -626,7 +633,7 @@ async function clickFlow(tabId, idx, runState, onPromote) {
         runState.challengeNotified = true;
         if (onPromote) await onPromote();
         if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
-        await mirror(runState);
+        await mirror(runState, "等待人工点击 Cloudflare 验证");
         try {
           const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
           chrome.notifications.create({

@@ -152,6 +152,7 @@ function makeEnv(opts = {}) {
           return out;
         },
         async set(o) { Object.assign(store, o); },
+        async remove(keys) { for (const k of [].concat(keys)) delete store[k]; },
       },
     },
     alarms: {
@@ -258,6 +259,7 @@ async function scenarioFreshSuccess() {
   ok(Object.keys(E.tabs).length === 0, "后台标签页已关闭");
   ok(E.cookieStore["gld:sess|glados.rocks|/"].value === "sess_orig", "cookie 会话已切回 orig（官方切回生效）");
   ok(E.badgeLog.includes("✓"), "角标 ✓");
+  ok(!("glados-watchdog" in E.alarms), "看门狗运行结束已撤岗（按需值班）");
 }
 
 // ===== 场景 2：会话失效（未登录）=====
