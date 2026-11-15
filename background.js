@@ -523,30 +523,40 @@ async function awaitResult(tabId, readFn, timeoutMs) {
   return "";
 }
 
-// 带后台超时重试的点击流程：后台标签页里 Turnstile 可能被浏览器节流，
-// 首次超时后把标签页提到前台再试一次，结束归还后台
+// 带后台超时重试的点击流程：后台标签页里 Turnstile 可能被浏览器节流/等可见性，
+// 首次超时或检测到需要人工验证时把标签页提到前台，结束后归还后台
 async function clickFlowWithRetry(tabId, idx, runState) {
-  let r = await clickFlow(tabId, idx, runState);
-  if (r.status !== "page-timeout") return r;
-  try { await chrome.tabs.update(tabId, { active: true }); } catch (e) {}
-  if (runState.accounts[idx]) {
-    runState.accounts[idx].status = "signing";
-    runState.accounts[idx].detail = "后台超时，提到前台重试";
-  }
-  await mirror(runState);
+  let promoted = false;
+  const promote = async () => {
+    if (promoted) return;
+    try { await chrome.tabs.update(tabId, { active: true }); promoted = true; } catch (e) {}
+  };
+  let r;
   try {
-    r = await clickFlow(tabId, idx, runState);
+    r = await clickFlow(tabId, idx, runState, promote);
+    if (r.status !== "page-timeout") return r;
+    await promote(); // 后台超时 → 前台重试
+    if (runState.accounts[idx]) {
+      runState.accounts[idx].status = "signing";
+      runState.accounts[idx].detail = "后台超时，提到前台重试";
+    }
+    await mirror(runState);
+    r = await clickFlow(tabId, idx, runState, promote);
   } finally {
-    try { await chrome.tabs.update(tabId, { active: false }); } catch (e) {}
+    if (promoted) {
+      try { await chrome.tabs.update(tabId, { active: false }); } catch (e) {}
+    }
   }
   return r;
 }
 
 // 单账号点击流程（短轮询；每轮更新心跳与该账号的实时状态）
-async function clickFlow(tabId, idx, runState) {
+async function clickFlow(tabId, idx, runState, onPromote) {
   let patched = false;
   let clicked = false;
   let clickAt = 0; // 像人一样：按钮出现后随机停留 0.8~2.5s 再点，不在出现的瞬间点
+  let challengeSeenAt = 0; // Cloudflare 验证出现时刻（0=未出现）
+  let challengePending = false;
   const startAt = Date.now();
   for (let i = 0; i < 50; i++) {
     runState.heartbeat = Date.now(); // 心跳
@@ -570,6 +580,27 @@ async function clickFlow(tabId, idx, runState) {
     }
     if (!st) { await sleep(1000); continue; }
 
+    // Cloudflare 整页挑战（"Just a moment..."）：整页都是验证，等待人工点击
+    if (st.cfPage) {
+      if (!challengeSeenAt) challengeSeenAt = Date.now();
+      if (!runState.challengeNotified && Date.now() - challengeSeenAt > 3000) {
+        runState.challengeNotified = true;
+        if (onPromote) await onPromote();
+        if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
+        await mirror(runState);
+        try {
+          chrome.notifications.create({
+            type: "basic",
+            iconUrl: "icons/icon128.png",
+            title: "GLaDOS：需要人工点击验证",
+            message: "签到页已置顶，请点击 Cloudflare 人机验证框，完成后自动继续",
+          });
+        } catch (e) {}
+      }
+      await sleep(3000);
+      continue;
+    }
+
     if (st.notLoggedIn) return { status: "not-logged-in", message: "被重定向到登录页/落地页" };
     if (st.alreadySigned) return { status: "already", message: st.message || "页面显示今日已签到" };
     if (st.marker) {
@@ -587,10 +618,31 @@ async function clickFlow(tabId, idx, runState) {
       }
     }
 
+    // Turnstile 内嵌验证等待人工点击：提亮前台 + 通知一次，人点完后令牌自动填、流程自动续
+    if (st.challenge) {
+      if (!challengePending) { challengePending = true; challengeSeenAt = Date.now(); }
+      if (!runState.challengeNotified && Date.now() - challengeSeenAt > 8000) {
+        runState.challengeNotified = true;
+        if (onPromote) await onPromote();
+        if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
+        await mirror(runState);
+        try {
+          chrome.notifications.create({
+            type: "basic",
+            iconUrl: "icons/icon128.png",
+            title: "GLaDOS：需要人工点击验证",
+            message: "签到页已置顶，请点击 Cloudflare 人机验证框，完成后自动继续",
+          });
+        } catch (e) {}
+      }
+    } else if (challengePending) {
+      challengePending = false; // 验证已通过（令牌已填）或已离开验证状态
+    }
+
     // 按钮出现又消失 → 重置停留计时；只在"从没见过按钮"时才判 40 秒无按钮
     if (!clicked && clickAt && !st.hasButton) clickAt = 0;
     // 页面迟迟不给按钮（未渲染完/非签到页）：别干等满轮，提前转前台重试
-    if (!clicked && !clickAt && i >= 40) {
+    if (!clicked && !clickAt && i >= 40 && !challengePending) {
       return { status: "page-timeout", message: "40 秒未见可点击的签到按钮，转前台重试" };
     }
 
@@ -604,7 +656,7 @@ async function clickFlow(tabId, idx, runState) {
         try { await exec(tabId, clickBtn); } catch (e) { clicked = false; }
       }
     }
-    await sleep(1000);
+    await sleep(challengePending ? 3000 : 1000); // 等人工验证时放慢轮询，给人足够的点击时间
   }
   return { status: "page-timeout", message: `约 60 秒内未完成签到流程（点击=${clicked}）` };
 }
@@ -908,6 +960,11 @@ function stepOnce(clicked) {
   // 3000 字符曾导致已签状态探测不到、干等超时（67s 卡顿观感的根因）
   const body = document.body ? document.body.innerText.slice(0, 20000) : "";
 
+  // Cloudflare 整页挑战（验证框铺满整页，站点内容还没加载）
+  if (/Just a moment|Verify you are human|Attention Required/i.test(body) || /just a moment/i.test(document.title || "")) {
+    return { cfPage: true };
+  }
+
   const notLoggedIn =
     url.includes("authenticate") ||
     url.includes("/login") ||
@@ -931,5 +988,12 @@ function stepOnce(clicked) {
   const btn = [...document.querySelectorAll("button, a")].find((b) =>
     /签到|check\s?in/i.test(b.innerText || "")
   );
-  return { hasButton: !!btn, clickedWas: !!clicked, marker };
+  // Turnstile 内嵌验证：iframe 出现且响应令牌为空 = 等待人工点击；令牌已填 = 已通过
+  let challenge = false;
+  try {
+    const respEl = document.querySelector('[name="cf-turnstile-response"]');
+    const frame = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+    challenge = !!frame && !(respEl && respEl.value);
+  } catch (e) {}
+  return { hasButton: !!btn, clickedWas: !!clicked, marker, challenge };
 }

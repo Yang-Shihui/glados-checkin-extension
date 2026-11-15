@@ -29,6 +29,7 @@ function makeEnv(opts = {}) {
   const switchLog = [];
   const notifLog = [];
   const badgeLog = [];
+  const activeLog = [];
   const tabs = {};
   let nextTabId = 1;
   let sessionAccount = "orig";
@@ -69,10 +70,27 @@ function makeEnv(opts = {}) {
         getAttribute(n) { return n === "data-glados-checkin" ? page.marker || null : null; },
         setAttribute(n, v) { if (n === "data-glados-checkin") page.marker = v; },
       },
+      title: "GLaDOS",
       body: { get innerText() { return page.bodyText; } },
+      querySelector(sel) {
+        if (sel.includes("challenges.cloudflare.com")) {
+          return page.challenge ? { src: "https://challenges.cloudflare.com/x" } : null;
+        }
+        if (sel.includes("cf-turnstile-response")) {
+          return page.challenge ? { value: page.turnstileSolved ? "tok" : "" } : null;
+        }
+        return null;
+      },
       querySelectorAll() {
         if (page.hasCheckinButton && !page.clicked) {
-          return [{ innerText: "Check in", click() { page.clicked = true; setTimeout(() => simulateCheckin(page), 1200); } }];
+          return [{
+            innerText: "Check in",
+            click() {
+              page.clicked = true;
+              if (opts.challenge) { page.challenge = true; } // 点击后出现 Turnstile，等人工点击
+              else { setTimeout(() => simulateCheckin(page), 1200); }
+            },
+          }];
         }
         return [];
       },
@@ -159,7 +177,7 @@ function makeEnv(opts = {}) {
         const t = tabs[id];
         if (!t) throw new Error("No such tab");
         if (o.url) { t.url = o.url; t.page = pageFor(); t.doc = docFor(t.page); }
-        if ("active" in o) t.active = o.active;
+        if ("active" in o) { t.active = o.active; activeLog.push(o.active); }
         return t;
       },
       async remove(id) { delete tabs[id]; },
@@ -208,7 +226,7 @@ function makeEnv(opts = {}) {
     throw new Error("运行超时未结束，progress=" + store.progress);
   }
 
-  return { chrome, store, alarms, switchLog, notifLog, badgeLog, tabs, cookieStore, msgLC, alarmLC, waitDone };
+  return { chrome, store, alarms, switchLog, notifLog, badgeLog, activeLog, tabs, cookieStore, msgLC, alarmLC, waitDone };
 }
 
 // ===== 场景 1：新鲜日，两账号，真签到 + 切换 + 还原（主路径）=====
@@ -275,6 +293,30 @@ async function scenarioRejected() {
   ok(res.some((x) => x.status === "already"), "另一个账号仍正常已签");
 }
 
+// ===== 场景 5：Cloudflare 人工点击验证（提亮前台 + 通知 + 人点完自动续）=====
+async function scenarioChallenge() {
+  console.log("--- 场景 5：人工点击验证 ---");
+  const E = makeEnv({ challenge: true });
+  new Function("chrome", src)(E.chrome);
+  await E.msgLC.fire({ cmd: "run" }, null, () => {});
+  // 模拟人类在第 16 秒点击 Cloudflare 验证框（通知/提亮之后）
+  setTimeout(() => {
+    for (const t of Object.values(E.tabs)) {
+      t.page.turnstileSolved = true;
+      t.page.marker = JSON.stringify({ code: 0, message: "Check-in success", points: 7.2 });
+      t.page.bodyText += " 签到成功";
+    }
+  }, 16000);
+  await E.waitDone(120000);
+
+  const res = E.store.lastResults;
+  ok(res.some((x) => x.status === "success"), "人工点击验证后签到成功");
+  ok(E.notifLog.some((n) => n.title.includes("需要人工点击验证")), "提亮前台 + 系统通知");
+  ok(E.activeLog.includes(true), "标签页自动提亮前台");
+  ok(E.activeLog.includes(false), "签完归还后台");
+  ok(res.some((x) => x.status === "restored"), "还原正常");
+}
+
 // ===== 场景 4：看门狗清理死运行 =====
 async function scenarioWatchdog() {
   console.log("--- 场景 4：看门狗 ---");
@@ -304,6 +346,7 @@ async function scenarioWatchdog() {
   await scenarioFreshSuccess();
   await scenarioNotLoggedIn();
   await scenarioRejected();
+  await scenarioChallenge();
   await scenarioWatchdog();
   console.log(fail === 0 ? "=== 集成测试全部通过 ===" : fail + " 处失败");
   process.exit(fail === 0 ? 0 : 1);
