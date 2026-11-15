@@ -49,7 +49,7 @@ function fullMsg(r) {
 }
 
 // 状态横幅：页面第一眼看到的就是它（签到中 / 今日全部已签 / 未完成 / 待签到）
-function renderBanner(st, rows, live) {
+function renderBanner(st, rows, live, todayGain) {
   let cls = "idle";
   let title = "待签到";
   let sub = "每天 12:15~12:45 / 19:00~19:20 随机自动运行";
@@ -70,9 +70,8 @@ function renderBanner(st, rows, live) {
   ) {
     cls = "ok";
     title = "今日全部已签";
-    const gain = rows.reduce((s, r) => s + (Number(r.points) || 0), 0);
     const parts = [];
-    if (gain > 0) parts.push(`今日 +${gain}`);
+    if (todayGain > 0) parts.push(`今日 +${todayGain}`);
     const t = (st.history || []).find((h) => h.date === todayStr());
     if (t && t.time) parts.push(`${esc(t.time)} 完成`);
     sub = parts.join(" · ") || "全部账号签到完成";
@@ -99,6 +98,10 @@ function acctHtml(r) {
     const parts = [];
     if (r.status === "success" && r.points != null && Number(r.points) > 0) {
       parts.push(`<span class="pts">+${esc(r.points)}</span>`);
+    }
+    // 已签行补显今日收益（来自当天历史的成功行汇总；真签成功行自带 +X 不重复）
+    if (r.status === "already" && r.todayGain != null && Number(r.todayGain) > 0) {
+      parts.push(`<span class="pts">今日 +${esc(r.todayGain)}</span>`);
     }
     if (r.balance != null && r.balance !== "") parts.push(`积分 ${esc(r.balance)}`);
     if (r.streak != null && Number(r.streak) > 0) parts.push(`连签 ${esc(r.streak)} 天`);
@@ -187,7 +190,23 @@ async function render() {
         ? st.runState.accounts
         : [];
 
-  renderBanner(st, rows, live);
+  // 今日收益：从历史里汇总今天所有"签到成功"行的 point（重跑的"今日已签"行不计）
+  const todayRows = (st.history || []).filter(
+    (h) => h.date === todayStr() && h.status === "success"
+  );
+  let todayGain = 0;
+  const gainsByWho = {};
+  for (const h of todayRows) {
+    const p = Number(h.points) || 0;
+    todayGain += p;
+    gainsByWho[h.who || ""] = (gainsByWho[h.who || ""] || 0) + p;
+  }
+  // 给"今日已签"的账号行补上今日收益（真签成功行自带 +X，不重复加）
+  for (const r of rows) {
+    if (r.status === "already") r.todayGain = gainsByWho[r.who];
+  }
+
+  renderBanner(st, rows, live, todayGain);
   // 还原/还原失败是"会话状态行"，不是账号卡——单独渲染成提示行，避免被当成第三个账号
   const acctRows = rows.filter((r) => r.status !== "restored" && r.status !== "restore-failed");
   const restoreRows = rows.filter((r) => r.status === "restored" || r.status === "restore-failed");

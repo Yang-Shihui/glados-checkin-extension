@@ -47,9 +47,9 @@ api.renderBanner({ lastSuccessDate: today, history: [{ date: today, time: "14:04
 check("横幅-成功", captured["banner:cls"] + "|" + captured["banner:html"],
   ["banner ok", "今日全部已签", "14:04 完成"], ["今日 +"]);
 
-// 2) 横幅-成功态带当日增量
+// 2) 横幅-成功态带今日收益（第 4 参数：从历史汇总的今日 point）
 api.renderBanner({ lastSuccessDate: today, history: [{ date: today, time: "14:04", status: "success" }] },
-  [{ who: "a@b.c", status: "success", points: 7, balance: 315 }], false);
+  [{ who: "a@b.c", status: "success", points: 7, balance: 315 }], false, 7);
 check("横幅-增量", captured["banner:html"], ["今日 +7"], []);
 
 // 3) 横幅-运行态（1/2 + 实时动作）
@@ -73,10 +73,10 @@ check("横幅-未登录提示", captured["banner:html"], ["需要先在控制台
 api.renderBanner({}, [], false);
 check("横幅-空闲", captured["banner:cls"] + "|" + captured["banner:html"], ["banner idle", "待签到"], []);
 
-// 5) 账号卡：已签 + 积分/连签（不出现英文样板）
+// 5) 账号卡：已签 + 今日收益 + 积分/连签（不出现英文样板）
 check("账号卡-已签",
-  api.acctHtml({ who: "user1@example.com", status: "already", points: 0, balance: 340, streak: 5 }),
-  ["user1@example.com", "今日已签", "积分 340", "连签 5 天"],
+  api.acctHtml({ who: "user1@example.com", status: "already", points: 0, balance: 340, streak: 5, todayGain: 5 }),
+  ["user1@example.com", "今日已签", "今日 +5", "积分 340", "连签 5 天"],
   ["Today", "+0"]);
 
 // 6) 账号卡：真签到 +7 → 绿色增量
@@ -179,6 +179,23 @@ console.log("PASS spinner 状态");
   };
   await api.render();
   check("双账号无提示", captured["accounts:html"], ["user2@example.com"], ["只检测到 1 个账号"]);
+
+  // 17) render 级：账号卡显示各自的今日收益（来自当天历史的成功行汇总）
+  stubState.storage = {
+    lastResults: [
+      { who: "user1@example.com", status: "already", balance: 585, streak: 5 },
+      { who: "user2@example.com", status: "already", balance: 320, streak: 3 },
+    ],
+    lastResultsDate: today, lastSuccessDate: today, running: false,
+    history: [
+      { date: today, time: "14:04", who: "user1@example.com", status: "success", points: 6 },
+      { date: today, time: "14:04", who: "user2@example.com", status: "success", points: 2 },
+    ],
+  };
+  await api.render();
+  check("账号卡-今日收益", captured["accounts:html"],
+    ["今日 +6", "今日 +2"],
+    ["今日 +8"]);
 
   console.log(fail === 0 ? "=== popup 渲染单测全部通过 ===" : fail + " 处失败");
   process.exit(fail === 0 ? 0 : 1);
