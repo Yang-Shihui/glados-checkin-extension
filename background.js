@@ -589,11 +589,12 @@ async function clickFlow(tabId, idx, runState, onPromote) {
         if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
         await mirror(runState);
         try {
+          const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
           chrome.notifications.create({
             type: "basic",
             iconUrl: "icons/icon128.png",
             title: "GLaDOS：需要人工点击验证",
-            message: "签到页已置顶，请点击 Cloudflare 人机验证框，完成后自动继续",
+            message: `签到页已置顶（${who}），请点击 Cloudflare 人机验证框，完成后自动继续`,
           });
         } catch (e) {}
       }
@@ -627,11 +628,12 @@ async function clickFlow(tabId, idx, runState, onPromote) {
         if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
         await mirror(runState);
         try {
+          const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
           chrome.notifications.create({
             type: "basic",
             iconUrl: "icons/icon128.png",
             title: "GLaDOS：需要人工点击验证",
-            message: "签到页已置顶，请点击 Cloudflare 人机验证框，完成后自动继续",
+            message: `签到页已置顶（${who}），请点击 Cloudflare 人机验证框，完成后自动继续`,
           });
         } catch (e) {}
       }
