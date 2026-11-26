@@ -213,8 +213,10 @@ function makeEnv(opts = {}) {
       async setBadgeBackgroundColor() {},
     },
     notifications: {
-      create(o) { notifLog.push(o); },
+      create(...args) { notifLog.push(args.length > 1 ? args[1] : args[0]); },
+      clear() { return true; },
       onClicked: mkLC(),
+      onButtonClicked: mkLC(),
     },
   };
 
@@ -313,7 +315,11 @@ async function scenarioChallenge() {
 
   const res = E.store.lastResults;
   ok(res.some((x) => x.status === "success"), "人工点击验证后签到成功");
-  ok(E.notifLog.some((n) => n.title.includes("需要人工点击验证")), "提亮前台 + 系统通知");
+  ok(E.notifLog.some((n) => n.title.includes("需要人工")), "提亮前台 + 系统通知");
+  ok(
+    E.notifLog.some((n) => /需要人工/.test(n.title) && Array.isArray(n.buttons) && n.buttons.length === 2),
+    "验证通知带「去点验证」按钮（人工接管一键直达）"
+  );
   ok(E.activeLog.includes(true), "标签页自动提亮前台");
   ok(E.activeLog.includes(false), "签完归还后台");
   ok(res.some((x) => x.status === "restored"), "还原正常");

@@ -215,7 +215,17 @@ async function render() {
     !live && acctRows.length === 1 && okRow(acctRows[0])
       ? '<div class="muted" style="font-size:11px; line-height:1.6; margin:2px 2px 6px;">只检测到 1 个账号——要多账号一起签，请在控制台右上角账号菜单「添加账号」绑定</div>'
       : "";
-  $accounts.innerHTML = acctRows.map(acctHtml).join("") + restoreNoteHtml(restoreRows) + singleHint;
+  // 等待人工验证时给出直达入口（人工接管：一键打开等待中的验证页）
+  const waiting = !!(st.running && st.runState && st.runState.challengeNotified);
+  $accounts.innerHTML =
+    acctRows.map(acctHtml).join("") +
+    restoreNoteHtml(restoreRows) +
+    (waiting
+      ? '<div class="restore-note warn" id="focus-verify" style="cursor:pointer; font-weight: 600;">⚠ 等待人工点击 Cloudflare 验证 · 点此打开验证页</div>'
+      : "") +
+    singleHint;
+  const fv = document.getElementById("focus-verify");
+  if (fv) fv.addEventListener("click", () => chrome.runtime.sendMessage({ cmd: "focus" }));
 
   if (st.running) {
     $btn.disabled = true;

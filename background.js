@@ -28,6 +28,18 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === RETRY) await maybeRun();
 });
 
+// 聚焦正在等待人工验证的标签页（人工接管 human-in-the-loop：通知/面板一键直达验证框）
+async function focusWaitingTab() {
+  const { runState } = await chrome.storage.local.get("runState");
+  if (!runState || !runState.active || !runState.tabId) return false;
+  try {
+    await chrome.tabs.update(runState.tabId, { active: true });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.cmd === "run") {
     startRun("manual");
@@ -40,11 +52,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .then(sendResponse);
     return true;
   }
+  if (msg && msg.cmd === "focus") {
+    focusWaitingTab().then((ok) => sendResponse({ ok }));
+    return true;
+  }
 });
 
-// 点系统通知直接打开控制台：失败 → 去处理；成功 → 看积分
-chrome.notifications.onClicked.addListener(() => {
+// 点系统通知：人工验证类 → 直达等待中的验证页；其他（成功/失败）→ 打开控制台
+chrome.notifications.onClicked.addListener(async (id) => {
+  if (id === "glados-challenge") {
+    await focusWaitingTab();
+    return;
+  }
   try { chrome.tabs.create({ url: "https://glados.rocks/console" }); } catch (e) {}
+});
+
+// 通知上的「去点验证」按钮：直达验证页后自动关闭通知
+chrome.notifications.onButtonClicked.addListener(async (id, btnIdx) => {
+  if (id === "glados-challenge" && btnIdx === 0) {
+    await focusWaitingTab();
+  }
+  try { chrome.notifications.clear(id); } catch (e) {}
 });
 
 // 每天两个签到窗口，实际时刻在窗口内随机——固定整点长期看太机械
@@ -621,12 +649,14 @@ async function clickFlow(tabId, idx, runState, onPromote) {
         await mirror(runState, "等待人工点击 Cloudflare 验证");
         try {
           const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
-          chrome.notifications.create({
+          chrome.notifications.create("glados-challenge", {
             type: "basic",
             iconUrl: "icons/icon128.png",
-            title: "GLaDOS：需要人工点击验证",
-            message: `签到页已置顶（${who}），请点击 Cloudflare 人机验证框，完成后自动继续`,
+            title: "GLaDOS：需要人工点一下验证（就一下）",
+            message: `签到页已置顶（${who}）——点「去点验证」直达，勾选后自动继续`,
+            buttons: [{ title: "去点验证" }, { title: "忽略" }],
           });
+          await setBadge("!", "#b45309");
         } catch (e) {}
       }
       await sleep(3000);
@@ -660,16 +690,23 @@ async function clickFlow(tabId, idx, runState, onPromote) {
         await mirror(runState, "等待人工点击 Cloudflare 验证");
         try {
           const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
-          chrome.notifications.create({
+          chrome.notifications.create("glados-challenge", {
             type: "basic",
             iconUrl: "icons/icon128.png",
-            title: "GLaDOS：需要人工点击验证",
-            message: `签到页已置顶（${who}），请点击 Cloudflare 人机验证框，完成后自动继续`,
+            title: "GLaDOS：需要人工点一下验证（就一下）",
+            message: `签到页已置顶（${who}）——点「去点验证」直达，勾选后自动继续`,
+            buttons: [{ title: "去点验证" }, { title: "忽略" }],
           });
+          await setBadge("!", "#b45309");
         } catch (e) {}
       }
     } else if (challengePending) {
       challengePending = false; // 验证已通过（令牌已填）或已离开验证状态
+      // 验证解决：清掉提醒（通知自动消失、面板入口收起）
+      if (runState.challengeNotified) {
+        runState.challengeNotified = false;
+        try { chrome.notifications.clear("glados-challenge"); } catch (e) {}
+      }
     }
 
     // 按钮出现又消失 → 重置停留计时；只在"从没见过按钮"时才判 40 秒无按钮
