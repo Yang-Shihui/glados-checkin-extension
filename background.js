@@ -617,6 +617,7 @@ async function clickFlow(tabId, idx, runState, onPromote) {
   let clickAt = 0; // 像人一样：按钮出现后随机停留 0.8~2.5s 再点，不在出现的瞬间点
   let challengeSeenAt = 0; // Cloudflare 验证出现时刻（0=未出现）
   let challengePending = false;
+  let clickedAt = 0; // 点击签到按钮的时刻（行为兜底：点击后长时间无结果 = 大概率在等人工验证）
   const startAt = Date.now();
   for (let i = 0; i < 50; i++) {
     runState.heartbeat = Date.now(); // 心跳
@@ -680,33 +681,38 @@ async function clickFlow(tabId, idx, runState, onPromote) {
       }
     }
 
-    // Turnstile 内嵌验证等待人工点击：提亮前台 + 通知一次，人点完后令牌自动填、流程自动续
-    if (st.challenge) {
-      if (!challengePending) { challengePending = true; challengeSeenAt = Date.now(); }
-      if (!runState.challengeNotified && Date.now() - challengeSeenAt > 8000) {
-        runState.challengeNotified = true;
-        if (onPromote) await onPromote();
-        if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
-        await mirror(runState, "等待人工点击 Cloudflare 验证");
-        try {
-          const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
-          chrome.notifications.create("glados-challenge", {
-            type: "basic",
-            iconUrl: "icons/icon128.png",
-            title: "GLaDOS：需要人工点一下验证（就一下）",
-            message: `签到页已置顶（${who}）——点「去点验证」直达，勾选后自动继续`,
-            buttons: [{ title: "去点验证" }, { title: "忽略" }],
-          });
-          await setBadge("!", "#b45309");
-        } catch (e) {}
-      }
-    } else if (challengePending) {
-      challengePending = false; // 验证已通过（令牌已填）或已离开验证状态
-      // 验证解决：清掉提醒（通知自动消失、面板入口收起）
+    // 人工验证等待判定：DOM 探测（iframe+空令牌）或行为兜底（点击后 12 秒无任何结果——
+    // 新版 UI 的 Turnstile 可能无法被 DOM 探测识别，行为判定不依赖页面结构）
+    const domChallenge = !!st.challenge;
+    const behaviorChallenge = clicked && clickedAt > 0 && Date.now() - clickedAt > 12000;
+    const waitingHuman = domChallenge || behaviorChallenge;
+    if (waitingHuman && !challengePending) {
+      challengePending = true;
+      challengeSeenAt = Date.now();
+    }
+    if (!waitingHuman && challengePending && !behaviorChallenge) {
+      challengePending = false; // 挑战消失且非行为等待 → 解除（行为等待只能被结果终结）
       if (runState.challengeNotified) {
         runState.challengeNotified = false;
         try { chrome.notifications.clear("glados-challenge"); } catch (e) {}
       }
+    }
+    if (challengePending && !runState.challengeNotified && Date.now() - challengeSeenAt > (domChallenge ? 8000 : 0)) {
+      runState.challengeNotified = true;
+      if (onPromote) await onPromote();
+      if (runState.accounts[idx]) runState.accounts[idx].detail = "等待人工点击 Cloudflare 验证";
+      await mirror(runState, "等待人工点击 Cloudflare 验证");
+      try {
+        const who = (runState.accounts[idx] && runState.accounts[idx].who) || "当前账号";
+        chrome.notifications.create("glados-challenge", {
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "GLaDOS：需要人工点一下验证（就一下）",
+          message: `签到页已置顶（${who}）——点「去点验证」直达，勾选后自动继续`,
+          buttons: [{ title: "去点验证" }, { title: "忽略" }],
+        });
+        await setBadge("!", "#b45309");
+      } catch (e) {}
     }
 
     // 按钮出现又消失 → 重置停留计时；只在"从没见过按钮"时才判 40 秒无按钮
@@ -723,7 +729,8 @@ async function clickFlow(tabId, idx, runState, onPromote) {
       if (!clickAt) clickAt = Date.now() + 800 + Math.floor(Math.random() * 1700);
       if (Date.now() >= clickAt) {
         clicked = true;
-        try { await exec(tabId, clickBtn); } catch (e) { clicked = false; }
+        clickedAt = Date.now();
+        try { await exec(tabId, clickBtn); } catch (e) { clicked = false; clickedAt = 0; }
       }
     }
     await sleep(challengePending ? 3000 : 1000); // 等人工验证时放慢轮询，给人足够的点击时间

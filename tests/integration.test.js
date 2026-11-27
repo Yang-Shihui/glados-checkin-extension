@@ -88,6 +88,7 @@ function makeEnv(opts = {}) {
             click() {
               page.clicked = true;
               if (opts.challenge) { page.challenge = true; } // 点击后出现 Turnstile，等人工点击
+              else if (opts.slowPunch) { setTimeout(() => simulateCheckin(page), 20000); } // 慢响应：模拟无法被 DOM 探测的验证等待
               else { setTimeout(() => simulateCheckin(page), 1200); }
             },
           }];
@@ -325,6 +326,21 @@ async function scenarioChallenge() {
   ok(res.some((x) => x.status === "restored"), "还原正常");
 }
 
+// ===== 场景 7：行为兜底——点击后长时间无结果（DOM 探测不可见的验证）→ 通知 + 置顶 =====
+async function scenarioBehavioralChallenge() {
+  console.log("--- 场景 7：行为兜底验证 ---");
+  const E = makeEnv({ slowPunch: true });
+  new Function("chrome", src)(E.chrome);
+  await E.msgLC.fire({ cmd: "run" }, null, () => {});
+  await E.waitDone(120000);
+
+  const res = E.store.lastResults;
+  ok(res.some((x) => x.status === "success"), "慢响应最终签到成功");
+  ok(E.notifLog.some((n) => /需要人工/.test(n.title)), "行为兜底触发通知");
+  ok(E.activeLog.includes(true), "标签页被置顶");
+  ok(res.some((x) => x.status === "restored"), "还原正常");
+}
+
 // ===== 场景 6：当天已签后的重跑（全部跳过——不点击不切换，防误触押注按钮）=====
 async function scenarioRerun() {
   console.log("--- 场景 6：当天已签重跑 ---");
@@ -377,6 +393,7 @@ async function scenarioWatchdog() {
   await scenarioNotLoggedIn();
   await scenarioRejected();
   await scenarioChallenge();
+  await scenarioBehavioralChallenge();
   await scenarioRerun();
   await scenarioWatchdog();
   console.log(fail === 0 ? "=== 集成测试全部通过 ===" : fail + " 处失败");
