@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GLaDOS 自动签到",
-  "version": "3.6.5",
+  "version": "3.6.6",
   "description": "GLaDOS (glados.rocks) 多账号自动签到：官方账号切换接口 + 真浏览器 Turnstile 流程",
   "permissions": [
     "alarms",

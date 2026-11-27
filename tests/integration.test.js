@@ -51,6 +51,10 @@ function makeEnv(opts = {}) {
     if (acct.signed) {
       return { bodyText: "console body Return tomorrow for more points.", hasCheckinButton: false, marker: null, clicked: false };
     }
+    if (opts.autoVerify) {
+      // 新版 UI：未签账号的页面自动进入"验证中"状态，无按钮、DOM 探测不可见
+      return { bodyText: "Points Trend Checking in ... Verifying Cloudflare check is slow on this network", hasCheckinButton: false, marker: null, clicked: false };
+    }
     return { bodyText: "console body Check in", hasCheckinButton: true, marker: null, clicked: false };
   }
 
@@ -341,6 +345,27 @@ async function scenarioBehavioralChallenge() {
   ok(res.some((x) => x.status === "restored"), "还原正常");
 }
 
+// ===== 场景 8：页面自动进入"验证中"（新版 UI 无按钮）→ 12s 后通知+置顶，人工通过后成功 =====
+async function scenarioVerifyingStuck() {
+  console.log("--- 场景 8：验证中卡住（无按钮）---");
+  const E = makeEnv({ autoVerify: true });
+  new Function("chrome", src)(E.chrome);
+  await E.msgLC.fire({ cmd: "run" }, null, () => {});
+  // 模拟 20 秒后人工勾选验证框 → 页面 POST → marker
+  setTimeout(() => {
+    for (const t of Object.values(E.tabs)) {
+      t.page.marker = JSON.stringify({ code: 0, message: "Check-in success", points: 5 });
+      t.page.bodyText += " 签到成功";
+    }
+  }, 20000);
+  await E.waitDone(150000);
+
+  const res = E.store.lastResults;
+  ok(res.some((x) => x.status === "success"), "验证卡住后人工通过 → 签到成功");
+  ok(E.notifLog.some((n) => /需要人工/.test(n.title)), "验证卡住触发通知");
+  ok(E.activeLog.includes(true), "标签页被置顶");
+}
+
 // ===== 场景 6：当天已签后的重跑（全部跳过——不点击不切换，防误触押注按钮）=====
 async function scenarioRerun() {
   console.log("--- 场景 6：当天已签重跑 ---");
@@ -394,6 +419,7 @@ async function scenarioWatchdog() {
   await scenarioRejected();
   await scenarioChallenge();
   await scenarioBehavioralChallenge();
+  await scenarioVerifyingStuck();
   await scenarioRerun();
   await scenarioWatchdog();
   console.log(fail === 0 ? "=== 集成测试全部通过 ===" : fail + " 处失败");

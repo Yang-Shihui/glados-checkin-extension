@@ -685,7 +685,9 @@ async function clickFlow(tabId, idx, runState, onPromote) {
     // 新版 UI 的 Turnstile 可能无法被 DOM 探测识别，行为判定不依赖页面结构）
     const domChallenge = !!st.challenge;
     const behaviorChallenge = clicked && clickedAt > 0 && Date.now() - clickedAt > 12000;
-    const waitingHuman = domChallenge || behaviorChallenge;
+    // 页面自动进入"验证中"且 12 秒无结果（新版 UI 无按钮可点、DOM 探测不可见）
+    const verifyingStuck = !!st.verifying && Date.now() - startAt > 12000;
+    const waitingHuman = domChallenge || behaviorChallenge || verifyingStuck;
     if (waitingHuman && !challengePending) {
       challengePending = true;
       challengeSeenAt = Date.now();
@@ -1074,5 +1076,8 @@ function stepOnce(clicked) {
     const frame = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     challenge = !!frame && !(respEl && respEl.value);
   } catch (e) {}
-  return { hasButton: !!btn, clickedWas: !!clicked, marker, challenge };
+  // 页面自身卡在"验证中/签到中"状态（新版 UI：Verifying… / Cloudflare check is slow…）
+  // —— Cloudflare 检查慢或要求人工时，页面会长时间停留此状态且没有按钮可点
+  const verifying = /Verifying|Cloudflare check is slow|still trying|Checking in/i.test(body);
+  return { hasButton: !!btn, clickedWas: !!clicked, marker, challenge, verifying };
 }
