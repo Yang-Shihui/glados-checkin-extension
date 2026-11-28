@@ -43,18 +43,18 @@ const check = (name, html, mustHave, mustNotHave) => {
 
 // 1) 横幅-成功态（今天已签 + 完成时间）
 api.renderBanner({ lastSuccessDate: today, history: [{ date: today, time: "14:04", status: "already" }] },
-  [{ who: "a@b.c", status: "already", points: 0, balance: 308, streak: 3 }], false);
+  [{ who: "a@example.com", status: "already", points: 0, balance: 308, streak: 3 }], false);
 check("横幅-成功", captured["banner:cls"] + "|" + captured["banner:html"],
   ["banner ok", "今日全部已签", "14:04 完成"], ["今日 +"]);
 
 // 2) 横幅-成功态带今日收益（第 4 参数：从历史汇总的今日 point）
 api.renderBanner({ lastSuccessDate: today, history: [{ date: today, time: "14:04", status: "success" }] },
-  [{ who: "a@b.c", status: "success", points: 7, balance: 315 }], false, 7);
+  [{ who: "a@example.com", status: "success", points: 7, balance: 315 }], false, 7);
 check("横幅-增量", captured["banner:html"], ["今日 +7"], []);
 
 // 3) 横幅-运行态（1/2 + 实时动作）
 api.renderBanner({ running: true, progress: "14:04 已完成 1/2 · 当前签到 45s" },
-  [{ who: "a@b.c", status: "already" }, { who: "b@qq.com", status: "signing", detail: "等待验证结果 (45s)" }], true);
+  [{ who: "a@example.com", status: "already" }, { who: "b@example.com", status: "signing", detail: "等待验证结果 (45s)" }], true);
 check("横幅-运行", captured["banner:cls"] + "|" + captured["banner:html"],
   ["banner run", "签到中 1/2", "等待验证结果 (45s)"], []);
 

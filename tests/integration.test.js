@@ -34,8 +34,8 @@ function makeEnv(opts = {}) {
   let nextTabId = 1;
   let sessionAccount = "orig";
   const accountsState = {
-    orig: { email: "orig@gmail.com", uid: 111222, signed: false, points: 108, streak: 1 },
-    other: { email: "other@gmail.com", uid: 333444, signed: true, points: 340, streak: 5 },
+    orig: { email: "orig@example.com", uid: 111222, signed: false, points: 108, streak: 1 },
+    other: { email: "other@example.com", uid: 333444, signed: true, points: 340, streak: 5 },
   };
   const cookieStore = {
     "gld:sess|glados.rocks|/": { name: "gld:sess", value: "orig_sess", domain: "glados.rocks", path: "/", secure: true },
@@ -121,7 +121,7 @@ function makeEnv(opts = {}) {
     const notFound = { ok: false, status: 404, json: async () => { throw new Error("404"); }, text: async () => "Not Found" };
     if (u === "/api/user/accounts") {
       if (opts.loggedOut || !accountsState[sessionAccount]) return json({ code: -2, message: "session invalid" });
-      return json({ code: 0, data: [{ userId: 333444, email: "other@gmail.com" }] });
+      return json({ code: 0, data: [{ userId: 333444, email: "other@example.com" }] });
     }
     if (u === "/api/user/info") {
       if (opts.loggedOut || !accountsState[sessionAccount]) return json({ code: -2 });
@@ -253,11 +253,11 @@ async function scenarioFreshSuccess() {
     "账号0 真签到成功 +7",
     JSON.stringify(res[0]).slice(0, 200)
   );
-  ok(res[0].who === "orig@gmail.com", "row0 邮箱来自身份接口");
+  ok(res[0].who === "orig@example.com", "row0 邮箱来自身份接口");
   ok(res[0].balance === 108 && res[0].streak === 1, "row0 积分/连签来自 /user/points");
-  ok(res[1].status === "already" && res[1].who === "other@gmail.com", "账号1 切换后已签（身份核实）");
+  ok(res[1].status === "already" && res[1].who === "other@example.com", "账号1 切换后已签（身份核实）");
   ok(res[1].balance === 340, "账号1 积分 340");
-  ok(res[2].status === "restored" && /orig@gmail\.com/.test(res[2].message), "还原行已切回原账号");
+  ok(res[2].status === "restored" && /orig@example.com/.test(res[2].message), "还原行已切回原账号");
   ok(E.switchLog.join(",") === "333444,111222", "切换序列：先切他人 333444，再切回 111222");
   ok(E.store.lastSuccessDate === new Date().toLocaleDateString("sv-SE"), "lastSuccessDate=今日");
   ok(!("glados-retry" in E.alarms), "成功后无重试闹钟");
@@ -373,8 +373,8 @@ async function scenarioRerun() {
   new Function("chrome", src)(E.chrome);
   const today = new Date().toLocaleDateString("sv-SE");
   E.store.history = [
-    { date: today, time: "14:27", who: "orig@gmail.com", status: "success", points: 6 },
-    { date: today, time: "14:27", who: "other@gmail.com", status: "already", points: 0 },
+    { date: today, time: "14:27", who: "orig@example.com", status: "success", points: 6 },
+    { date: today, time: "14:27", who: "other@example.com", status: "already", points: 0 },
   ];
   await E.msgLC.fire({ cmd: "run" }, null, () => {});
   await E.waitDone();
@@ -399,7 +399,7 @@ async function scenarioWatchdog() {
     trigger: "auto",
     tabId: tab.id,
     heartbeat: Date.now() - 100000, // 心跳已死 100 秒
-    accounts: [{ who: "orig@gmail.com", status: "signing" }],
+    accounts: [{ who: "orig@example.com", status: "signing" }],
     snapshot: [{ name: "gld:sess", value: "orig_sess", domain: "glados.rocks", path: "/", secure: true }],
   };
   E.store.running = true;
